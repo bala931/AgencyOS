@@ -10,3 +10,7 @@ def home():
         "message": "AgencyOS API is running",
         "status": "success"
     }
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
