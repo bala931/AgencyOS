@@ -78,3 +78,29 @@ def update_brief(brief_id: int, updated_data: Brief):
         status_code=404,
         detail="Brief not found"
     )
+# Delete an existing brief
+# Delete an existing brief
+@app.delete(
+    "/briefs/{brief_id}",
+    status_code=200,
+    responses={
+        404: {"description": "Brief not found"}
+    }
+)
+def delete_brief(brief_id: int):
+
+    for index, brief in enumerate(briefs):
+
+        if brief["id"] == brief_id:
+
+            deleted_brief = briefs.pop(index)
+
+            return {
+                "message": "Brief deleted successfully",
+                "brief": deleted_brief
+            }
+
+    raise HTTPException(
+        status_code=404,
+        detail="Brief not found"
+    )
