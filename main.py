@@ -1,17 +1,29 @@
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 app = FastAPI(title="AgencyOS API")
-
-# Request data structure
-class Brief(BaseModel):
-    title: str
-    description: str
-
-# Temporary storage
+# Temporary in-memory storage
 briefs = []
 next_id = 1
+
+class Brief(BaseModel):
+
+    title: str = Field(min_length=1, max_length=100)
+
+    description: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("title", "description", mode="before")
+    @classmethod
+    def validate_text(cls, value):
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                raise ValueError("Field cannot be empty or contain only spaces")
+
+        return value
 
 
 @app.get("/")
@@ -78,7 +90,6 @@ def update_brief(brief_id: int, updated_data: Brief):
         status_code=404,
         detail="Brief not found"
     )
-# Delete an existing brief
 # Delete an existing brief
 @app.delete(
     "/briefs/{brief_id}",
