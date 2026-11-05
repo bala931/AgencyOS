@@ -1,11 +1,27 @@
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
+
+from database import SessionLocal
+import models
+
 
 app = FastAPI(title="AgencyOS API")
-# Temporary in-memory storage
-briefs = []
-next_id = 1
+
+
+# ---------------- DATABASE SESSION ----------------
+
+def get_db():
+    db = SessionLocal()
+
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------------- REQUEST VALIDATION ----------------
 
 class Brief(BaseModel):
 
@@ -21,10 +37,14 @@ class Brief(BaseModel):
             value = value.strip()
 
             if not value:
-                raise ValueError("Field cannot be empty or contain only spaces")
+                raise ValueError(
+                    "Field cannot be empty or contain only spaces"
+                )
 
         return value
 
+
+# ---------------- HOME AND HEALTH ----------------
 
 @app.get("/")
 def home():
@@ -36,61 +56,117 @@ def health_check():
     return {"status": "healthy"}
 
 
-# Create a client brief
-@app.post("/briefs", status_code=201)
-def create_brief(brief: Brief):
-    global next_id
+# ---------------- CREATE A CLIENT BRIEF ----------------
 
-    new_brief = {
-        "id": next_id,
+@app.post("/briefs", status_code=201)
+def create_brief(
+    brief: Brief,
+    db: Session = Depends(get_db)
+):
+
+    new_brief = models.BriefModel(
+        title=brief.title,
+        description=brief.description
+    )
+
+    try:
+        db.add(new_brief)
+        db.commit()
+        db.refresh(new_brief)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "id": new_brief.id,
+        "title": new_brief.title,
+        "description": new_brief.description
+    }
+
+
+# ---------------- RETRIEVE ALL BRIEFS ----------------
+
+@app.get("/briefs")
+def get_briefs(db: Session = Depends(get_db)):
+
+    briefs = db.query(models.BriefModel).order_by(
+        models.BriefModel.id
+    ).all()
+
+    return [
+        {
+            "id": brief.id,
+            "title": brief.title,
+            "description": brief.description
+        }
+        for brief in briefs
+    ]
+
+
+# ---------------- RETRIEVE ONE BRIEF ----------------
+
+@app.get("/briefs/{brief_id}")
+def get_brief(
+    brief_id: int,
+    db: Session = Depends(get_db)
+):
+
+    brief = db.get(models.BriefModel, brief_id)
+
+    if brief is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Brief not found"
+        )
+
+    return {
+        "id": brief.id,
         "title": brief.title,
         "description": brief.description
     }
 
-    briefs.append(new_brief)
-    next_id += 1
 
-    return new_brief
+# ---------------- UPDATE AN EXISTING BRIEF ----------------
 
-
-# Retrieve all briefs
-@app.get("/briefs")
-def get_briefs():
-    return briefs
-
-
-# Retrieve one brief
-@app.get("/briefs/{brief_id}")
-def get_brief(brief_id: int):
-    for brief in briefs:
-        if brief["id"] == brief_id:
-            return brief
-
-    raise HTTPException(
-        status_code=404,
-        detail="Brief not found"
-    )
-
-# Update an existing brief
 @app.put("/briefs/{brief_id}")
-def update_brief(brief_id: int, updated_data: Brief):
+def update_brief(
+    brief_id: int,
+    updated_data: Brief,
+    db: Session = Depends(get_db)
+):
 
-    for brief in briefs:
-        if brief["id"] == brief_id:
+    brief = db.get(models.BriefModel, brief_id)
 
-            brief["title"] = updated_data.title
-            brief["description"] = updated_data.description
+    if brief is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Brief not found"
+        )
 
-            return {
-                "message": "Brief updated successfully",
-                "brief": brief
-            }
+    brief.title = updated_data.title
+    brief.description = updated_data.description
 
-    raise HTTPException(
-        status_code=404,
-        detail="Brief not found"
-    )
-# Delete an existing brief
+    try:
+        db.commit()
+        db.refresh(brief)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "message": "Brief updated successfully",
+        "brief": {
+            "id": brief.id,
+            "title": brief.title,
+            "description": brief.description
+        }
+    }
+
+
+# ---------------- DELETE AN EXISTING BRIEF ----------------
+
 @app.delete(
     "/briefs/{brief_id}",
     status_code=200,
@@ -98,20 +174,34 @@ def update_brief(brief_id: int, updated_data: Brief):
         404: {"description": "Brief not found"}
     }
 )
-def delete_brief(brief_id: int):
+def delete_brief(
+    brief_id: int,
+    db: Session = Depends(get_db)
+):
 
-    for index, brief in enumerate(briefs):
+    brief = db.get(models.BriefModel, brief_id)
 
-        if brief["id"] == brief_id:
+    if brief is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Brief not found"
+        )
 
-            deleted_brief = briefs.pop(index)
+    deleted_brief = {
+        "id": brief.id,
+        "title": brief.title,
+        "description": brief.description
+    }
 
-            return {
-                "message": "Brief deleted successfully",
-                "brief": deleted_brief
-            }
+    try:
+        db.delete(brief)
+        db.commit()
 
-    raise HTTPException(
-        status_code=404,
-        detail="Brief not found"
-    )
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "message": "Brief deleted successfully",
+        "brief": deleted_brief
+    }
