@@ -1,10 +1,10 @@
-
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
 import models
+from schemas import TaskCreate, TaskUpdate, TaskResponse
 
 
 app = FastAPI(title="AgencyOS API")
@@ -204,4 +204,172 @@ def delete_brief(
     return {
         "message": "Brief deleted successfully",
         "brief": deleted_brief
+    }
+# ---------------- CREATE A TASK UNDER A BRIEF ----------------
+
+@app.post(
+    "/briefs/{brief_id}/tasks",
+    response_model=TaskResponse,
+    status_code=201
+)
+def create_task(
+    brief_id: int,
+    task: TaskCreate,
+    db: Session = Depends(get_db)
+):
+
+    # Check whether the parent brief exists
+    brief = db.get(models.BriefModel, brief_id)
+
+    if brief is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Brief not found"
+        )
+
+    # Create the task
+    new_task = models.TaskModel(
+        title=task.title,
+        description=task.description,
+        brief_id=brief_id
+    )
+
+    try:
+        db.add(new_task)
+        db.commit()
+        db.refresh(new_task)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return new_task
+# ---------------- RETRIEVE ALL TASKS UNDER A BRIEF ----------------
+
+@app.get(
+    "/briefs/{brief_id}/tasks",
+    response_model=list[TaskResponse]
+)
+def get_tasks(
+    brief_id: int,
+    db: Session = Depends(get_db)
+):
+
+    # Check whether the parent brief exists
+    brief = db.get(models.BriefModel, brief_id)
+
+    if brief is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Brief not found"
+        )
+
+    # Retrieve tasks belonging to this brief
+    tasks = db.query(models.TaskModel).filter(
+        models.TaskModel.brief_id == brief_id
+    ).order_by(
+        models.TaskModel.id
+    ).all()
+
+    return tasks
+# ---------------- RETRIEVE ONE TASK ----------------
+
+@app.get(
+    "/briefs/{brief_id}/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def get_task(
+    brief_id: int,
+    task_id: int,
+    db: Session = Depends(get_db)
+):
+
+    task = db.query(models.TaskModel).filter(
+        models.TaskModel.id == task_id,
+        models.TaskModel.brief_id == brief_id
+    ).first()
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    return task
+# ---------------- UPDATE AN EXISTING TASK ----------------
+
+@app.put(
+    "/briefs/{brief_id}/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def update_task(
+    brief_id: int,
+    task_id: int,
+    updated_data: TaskUpdate,
+    db: Session = Depends(get_db)
+):
+
+    task = db.query(models.TaskModel).filter(
+        models.TaskModel.id == task_id,
+        models.TaskModel.brief_id == brief_id
+    ).first()
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    task.title = updated_data.title
+    task.description = updated_data.description
+    task.status = updated_data.status
+
+    try:
+        db.commit()
+        db.refresh(task)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return task
+# ---------------- DELETE AN EXISTING TASK ----------------
+
+@app.delete("/briefs/{brief_id}/tasks/{task_id}")
+def delete_task(
+    brief_id: int,
+    task_id: int,
+    db: Session = Depends(get_db)
+):
+
+    task = db.query(models.TaskModel).filter(
+        models.TaskModel.id == task_id,
+        models.TaskModel.brief_id == brief_id
+    ).first()
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    deleted_task = {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status.value,
+        "brief_id": task.brief_id
+    }
+
+    try:
+        db.delete(task)
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "message": "Task deleted successfully",
+        "task": deleted_task
     }

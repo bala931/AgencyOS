@@ -322,3 +322,288 @@ def test_delete_missing_brief(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Brief not found"
+
+# ---------------- TASK TEST HELPERS ----------------
+
+def create_test_brief(client, title="Test Brief"):
+    response = client.post(
+        "/briefs",
+        json={
+            "title": title,
+            "description": "A brief for testing tasks"
+        }
+    )
+
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def create_test_task(client, brief_id, title="Test Task"):
+    return client.post(
+        f"/briefs/{brief_id}/tasks",
+        json={
+            "title": title,
+            "description": "A task for testing"
+        }
+    )
+
+
+# ---------------- TASK CREATE TESTS ----------------
+
+def test_create_task(client):
+    brief_id = create_test_brief(client)
+
+    response = create_test_task(client, brief_id)
+
+    assert response.status_code == 201
+
+    data = response.json()
+
+    assert data["title"] == "Test Task"
+    assert data["description"] == "A task for testing"
+    assert data["status"] == "todo"
+    assert data["brief_id"] == brief_id
+    assert "id" in data
+
+
+def test_create_task_under_missing_brief(client):
+    response = create_test_task(client, 999)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Brief not found"
+
+
+def test_create_task_with_whitespace_title(client):
+    brief_id = create_test_brief(client)
+
+    response = client.post(
+        f"/briefs/{brief_id}/tasks",
+        json={
+            "title": "   ",
+            "description": "Valid description"
+        }
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_task_with_long_title(client):
+    brief_id = create_test_brief(client)
+
+    response = client.post(
+        f"/briefs/{brief_id}/tasks",
+        json={
+            "title": "A" * 101,
+            "description": "Valid description"
+        }
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_task_with_long_description(client):
+    brief_id = create_test_brief(client)
+
+    response = client.post(
+        f"/briefs/{brief_id}/tasks",
+        json={
+            "title": "Valid Task",
+            "description": "A" * 1001
+        }
+    )
+
+    assert response.status_code == 422
+
+
+# ---------------- TASK READ TESTS ----------------
+
+def test_get_all_tasks_under_brief(client):
+    brief_id = create_test_brief(client)
+
+    create_test_task(client, brief_id, "Task One")
+    create_test_task(client, brief_id, "Task Two")
+
+    response = client.get(f"/briefs/{brief_id}/tasks")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert response.json()[0]["title"] == "Task One"
+    assert response.json()[1]["title"] == "Task Two"
+
+
+def test_get_tasks_only_for_requested_brief(client):
+    first_brief_id = create_test_brief(client, "First Brief")
+    second_brief_id = create_test_brief(client, "Second Brief")
+
+    create_test_task(client, first_brief_id, "First Task")
+    create_test_task(client, second_brief_id, "Second Task")
+
+    response = client.get(f"/briefs/{first_brief_id}/tasks")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["title"] == "First Task"
+
+
+def test_get_tasks_under_missing_brief(client):
+    response = client.get("/briefs/999/tasks")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Brief not found"
+
+
+def test_get_one_task(client):
+    brief_id = create_test_brief(client)
+    create_response = create_test_task(client, brief_id)
+
+    task_id = create_response.json()["id"]
+
+    response = client.get(
+        f"/briefs/{brief_id}/tasks/{task_id}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == task_id
+    assert response.json()["title"] == "Test Task"
+
+
+def test_get_missing_task(client):
+    brief_id = create_test_brief(client)
+
+    response = client.get(
+        f"/briefs/{brief_id}/tasks/999"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
+
+
+def test_get_task_from_wrong_brief(client):
+    first_brief_id = create_test_brief(client, "First Brief")
+    second_brief_id = create_test_brief(client, "Second Brief")
+
+    task_response = create_test_task(
+        client, first_brief_id
+    )
+
+    task_id = task_response.json()["id"]
+
+    response = client.get(
+        f"/briefs/{second_brief_id}/tasks/{task_id}"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
+
+
+# ---------------- TASK UPDATE TESTS ----------------
+
+def test_update_task(client):
+    brief_id = create_test_brief(client)
+    create_response = create_test_task(client, brief_id)
+
+    task_id = create_response.json()["id"]
+
+    response = client.put(
+        f"/briefs/{brief_id}/tasks/{task_id}",
+        json={
+            "title": "Updated Task",
+            "description": "Updated task description",
+            "status": "in_progress"
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["title"] == "Updated Task"
+    assert data["description"] == "Updated task description"
+    assert data["status"] == "in_progress"
+
+
+def test_update_task_status_to_done(client):
+    brief_id = create_test_brief(client)
+    task_id = create_test_task(
+        client, brief_id
+    ).json()["id"]
+
+    response = client.put(
+        f"/briefs/{brief_id}/tasks/{task_id}",
+        json={
+            "title": "Completed Task",
+            "description": "Task completed successfully",
+            "status": "done"
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "done"
+
+
+def test_update_task_with_invalid_status(client):
+    brief_id = create_test_brief(client)
+    task_id = create_test_task(
+        client, brief_id
+    ).json()["id"]
+
+    response = client.put(
+        f"/briefs/{brief_id}/tasks/{task_id}",
+        json={
+            "title": "Updated Task",
+            "description": "Updated description",
+            "status": "invalid_status"
+        }
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_missing_task(client):
+    brief_id = create_test_brief(client)
+
+    response = client.put(
+        f"/briefs/{brief_id}/tasks/999",
+        json={
+            "title": "Updated Task",
+            "description": "Updated description",
+            "status": "done"
+        }
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
+
+
+# ---------------- TASK DELETE TESTS ----------------
+
+def test_delete_task(client):
+    brief_id = create_test_brief(client)
+    create_response = create_test_task(client, brief_id)
+
+    task_id = create_response.json()["id"]
+
+    response = client.delete(
+        f"/briefs/{brief_id}/tasks/{task_id}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Task deleted successfully"
+    assert response.json()["task"]["id"] == task_id
+
+    get_response = client.get(
+        f"/briefs/{brief_id}/tasks/{task_id}"
+    )
+
+    assert get_response.status_code == 404
+
+
+def test_delete_missing_task(client):
+    brief_id = create_test_brief(client)
+
+    response = client.delete(
+        f"/briefs/{brief_id}/tasks/999"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
